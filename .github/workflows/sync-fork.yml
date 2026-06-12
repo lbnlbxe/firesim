@@ -1,0 +1,19 @@
+name: Automatic Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs every day at midnight UTC
+  workflow_dispatch:   # Allows you to trigger this manually from the Actions tab
+
+jobs:
+  sync:
+    name: Sync Main with Upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Grants permission to push updates to your fork
+
+    steps:
+      - name: Run GitHub Native Repo Sync
+        run: gh repo sync ${{ github.repository }} -b main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
