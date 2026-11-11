@@ -11,6 +11,7 @@ on:
 
 permissions:
   issues: write
+  contents: read # gh api matching-refs (tag check) needs Contents: read
 
 jobs:
   check:

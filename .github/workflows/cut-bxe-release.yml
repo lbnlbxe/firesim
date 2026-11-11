@@ -72,6 +72,14 @@ jobs:
 
           git checkout main
 
+          # Guard: only upstream release TAGS may be merged (never upstream
+          # main) -- this is the core BXE release policy.
+          if ! git rev-parse --verify -q "refs/tags/$UPSTREAM_REF" >/dev/null; then
+            echo "ERROR: '$UPSTREAM_REF' is not a tag on firesim/firesim." >&2
+            echo "Only upstream release tags may be cut into BXE releases." >&2
+            exit 1
+          fi
+
           # The merge runs inside `if` so a conflict exit code is handled
           # below instead of tripping the shell's errexit.
           if git merge --no-edit "$UPSTREAM_REF"; then
