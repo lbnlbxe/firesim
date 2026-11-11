@@ -1,0 +1,6 @@
+# SDD ledger — plan: /home/ffard/.opencode/plan/2026-11-11-firesim-bxe-release-automation.md
+Pre-flight: T1→T2/T3 share the clone branch (bxe-release-automation); T2 upstream-tag-name verification feeds T4 handoff; no conflicts.
+Task 1: complete — clone at /tmp/opencode/firesim-fork, branch bxe-release-automation off fork main (4835490); sync-fork.yml confirmed as the daily gh repo sync cron and removed (commit a5e29c9). Note: fork main HEAD is a merge of firesim:main into main — fork main has moved since the June #1860 merge; no impact on workflow authoring.
+Task 2: complete — cut-bxe-release.yml written; 2 run blocks bash -n OK; YAML validated (with PyYAML on->True normalization). Ruling: inputs reach shell only via env vars (workflow-injection hardening). Ruling: verified upstream 1.22.0 tag is named \"1.22.0\" (no v prefix) at commit e1bdea8 — matches the Chipyard 1.15.0 pin exactly; first dispatch should use upstream_ref=1.22.0, bxe_tag=v1.22.0-bxe.1.
+Task 3: complete — upstream-release-watcher.yml written; bash -n OK. Ruling: tag-existence check uses gh api matching-refs (the job has no checkout, so git ls-remote origin would fail) — caught in self-review before commit.
+Task 4: complete — 3 commits, only .github/workflows touched, sync-fork.yml gone, both workflows parse.

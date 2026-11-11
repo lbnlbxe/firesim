@@ -1,0 +1,122 @@
+name: Cut BXE Release
+
+# Cuts a BXE FireSim release tag (vX.Y.Z-bxe.N) by merging an upstream
+# release tag into fork main (which carries the PR #1860 delta).
+#
+# - Clean merge  -> push main, tag it, push the tag. No human needed.
+# - Conflicts    -> push the conflict-marked merge to release-conflict/<tag>
+#                   and open a PR for human resolution. Never tags.
+# - tag_ref set  -> tag an existing ref (use after a conflict PR is merged:
+#                   re-dispatch with tag_ref: main and the same bxe_tag).
+#
+# NOTE: deliberately NO build/CI gate before tagging (BXE decision, 2026-11).
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream firesim tag/ref to cut from (e.g. 1.22.0)'
+        required: true
+        type: string
+      bxe_tag:
+        description: 'BXE tag to create (e.g. v1.22.0-bxe.1)'
+        required: true
+        type: string
+      tag_ref:
+        description: 'Optional: tag this existing ref instead of merging (e.g. main, after a conflict PR was merged)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cut:
+    name: Cut BXE release tag
+    runs-on: ubuntu-latest
+    env:
+      # Inputs reach the shell only via these variables -- never inline
+      # ${{ }} interpolation -- so they cannot inject into run scripts.
+      UPSTREAM_REF: ${{ inputs.upstream_ref }}
+      BXE_TAG: ${{ inputs.bxe_tag }}
+      TAG_REF: ${{ inputs.tag_ref }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git and remotes
+        run: |
+          git config user.name "bxe-release-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/firesim/firesim.git
+          git fetch upstream --tags
+          git fetch origin --tags main
+
+      - name: Tag existing ref, or merge upstream into main
+        run: |
+          set -euo pipefail
+
+          # Post-conflict path: a conflict PR was already merged; just tag.
+          if [ -n "$TAG_REF" ]; then
+            git tag "$BXE_TAG" "$TAG_REF"
+            git push origin "refs/tags/$BXE_TAG"
+            echo "BXE release $BXE_TAG tagged at $TAG_REF."
+            exit 0
+          fi
+
+          git checkout main
+
+          # Guard: only upstream release TAGS may be merged (never upstream
+          # main) -- this is the core BXE release policy.
+          if ! git rev-parse --verify -q "refs/tags/$UPSTREAM_REF" >/dev/null; then
+            echo "ERROR: '$UPSTREAM_REF' is not a tag on firesim/firesim." >&2
+            echo "Only upstream release tags may be cut into BXE releases." >&2
+            exit 1
+          fi
+
+          # The merge runs inside `if` so a conflict exit code is handled
+          # below instead of tripping the shell's errexit.
+          if git merge --no-edit "$UPSTREAM_REF"; then
+            git push origin main
+            git tag "$BXE_TAG" main
+            git push origin "refs/tags/$BXE_TAG"
+            echo "BXE release $BXE_TAG cut from $UPSTREAM_REF (clean merge)."
+            exit 0
+          fi
+
+          # ---- Conflict path: never tags, never touches main. ----
+          # Capture the conflicted file list BEFORE staging (staging
+          # clears the unmerged index entries).
+          CONFLICTED="$(git diff --name-only --diff-filter=U)"
+          BRANCH="release-conflict/$BXE_TAG"
+          git checkout -b "$BRANCH"
+          # `git add -A` stages the working-tree files (conflict markers
+          # included), clearing the unmerged state so commit succeeds.
+          git add -A
+          git commit --no-verify -m "conflict markers for $BXE_TAG -- resolve and merge into main"
+          git push -u origin "$BRANCH"
+
+          {
+            echo "Automatic merge of \`$UPSTREAM_REF\` into \`main\` (for \`$BXE_TAG\`) hit conflicts."
+            echo ""
+            echo "Conflicted files:"
+            echo '```'
+            echo "$CONFLICTED"
+            echo '```'
+            echo ""
+            echo "**Resolution steps:**"
+            echo "1. Resolve the conflict markers on this branch and push."
+            echo "2. Merge this PR into \`main\`."
+            echo "3. Re-run the **Cut BXE Release** workflow with \`tag_ref: main\` (leave \`upstream_ref\` as-is, keep the same \`bxe_tag\`) to create the tag."
+          } > pr_body.md
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "BXE release $BXE_TAG: conflicts need human resolution" \
+            --body-file pr_body.md
