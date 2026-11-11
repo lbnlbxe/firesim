@@ -1,0 +1,51 @@
+name: Upstream Release Watcher
+
+# Opens (at most one) issue when firesim/firesim publishes a release the
+# fork has no matching BXE tag for (v<upstream>), so BXE release cuts do
+# not depend on someone noticing upstream releases themselves.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    name: Check for new upstream releases
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Compare upstream latest release with fork tags
+        run: |
+          set -euo pipefail
+
+          LATEST="$(gh api repos/firesim/firesim/releases/latest --jq .tag_name)"
+          echo "Upstream latest release: $LATEST"
+
+          # A BXE tag for this release exists if any fork tag contains the
+          # upstream name (exact upstream tag, v<upstream>, or v<upstream>-bxe.N).
+          if gh api "repos/${GH_REPO}/git/matching-refs/tags/" --jq '.[].ref' | grep -q "${LATEST}"; then
+            echo "A fork tag matching ${LATEST} already exists; nothing to do."
+            exit 0
+          fi
+
+          TITLE="Upstream FireSim release ${LATEST} available for BXE cut"
+          if gh issue list --state open --search "in:title \"${TITLE}\"" | grep -q .; then
+            echo "Issue already open for ${LATEST}; nothing to do."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "$TITLE" \
+            --body "Upstream [firesim/firesim] published release \`${LATEST}\` and no matching BXE tag exists on this fork.
+
+            Cut it with the **Cut BXE Release** workflow (Actions tab -> Cut BXE Release -> Run workflow):
+            - \`upstream_ref\`: \`${LATEST}\`
+            - \`bxe_tag\`: \`v${LATEST}-bxe.1\` (bump the \`.N\` if this release was already cut)
+
+            If the merge conflicts, the workflow opens a PR for human resolution."
